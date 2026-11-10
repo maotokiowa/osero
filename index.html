@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>視線オセロ Pro (4x4 爆速＆花火復活)</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@700&display=swap');
+        
+        * { box-sizing: border-box; user-select: none; }
+        body { font-family: 'M PLUS Rounded 1c', sans-serif; background: radial-gradient(circle at center, #1e293b, #0f172a); color: #fff; margin: 0; padding: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
+        
+        .header { display: flex; gap: 20px; margin-bottom: 15px; align-items: center; background: rgba(255, 255, 255, 0.05); padding: 10px 30px; border-radius: 20px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); z-index: 10; }
+        .score-box { display: flex; align-items: center; gap: 10px; font-size: 24px; font-weight: bold; }
+        .mini-disc { width: 24px; height: 24px; border-radius: 50%; box-shadow: 1px 1px 3px rgba(0,0,0,0.5); }
+        .mini-disc.black { background: radial-gradient(circle at 30% 30%, #555, #000); }
+        .mini-disc.white { background: radial-gradient(circle at 30% 30%, #fff, #ccc); }
+        #turn-info { font-size: 26px; color: #38bdf8; text-shadow: 0 0 10px rgba(56, 189, 248, 0.5); margin: 0 15px; }
+
+        .board-wrapper { position: relative; padding: 12px; background: linear-gradient(145deg, #1e293b, #0f172a); border-radius: 16px; box-shadow: 0 15px 35px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.2); border: 2px solid #334155; z-index: 10; }
+        
+        #board { display: grid; grid-template-columns: repeat(4, 1fr); width: 65vmin; height: 65vmin; max-width: 350px; max-height: 350px; background-color: #0b5e2c; border: 4px solid #063819; border-radius: 8px; box-shadow: inset 0 0 20px rgba(0,0,0,0.5); position: relative; }
+        .cell { border: 1px solid rgba(0, 0, 0, 0.3); display: flex; align-items: center; justify-content: center; position: relative; }
+        
+        .disc-container { perspective: 1000px; width: 85%; height: 85%; position: absolute; z-index: 10; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+        .disc-container.visible { opacity: 1; }
+        .disc { width: 100%; height: 100%; position: relative; transition: transform 0.6s cubic-bezier(0.4, 0.0, 0.2, 1); transform-style: preserve-3d; }
+        .disc.black-up { transform: rotateY(0deg); }
+        .disc.white-up { transform: rotateY(180deg); }
+        
+        .disc-face { position: absolute; width: 100%; height: 100%; backface-visibility: hidden; border-radius: 50%; box-shadow: 3px 3px 8px rgba(0,0,0,0.6), inset -2px -2px 6px rgba(0,0,0,0.4); }
+        .disc-face.black-side { background: radial-gradient(circle at 35% 35%, #555, #111); transform: rotateY(0deg); }
+        .disc-face.white-side { background: radial-gradient(circle at 35% 35%, #fff, #ddd); transform: rotateY(180deg); }
+
+        .hint-ring { position: absolute; width: 40%; height: 40%; border-radius: 50%; border: 3px solid rgba(255, 255, 255, 0.4); opacity: 0; transition: all 0.3s ease; }
+        .hint-ring.valid { opacity: 1; }
+        .hint-ring.focused { width: 80%; height: 80%; border-color: #facc15; background: rgba(250, 204, 21, 0.3); box-shadow: 0 0 20px #facc15, inset 0 0 10px #facc15; animation: pulse-pro 1s infinite alternate; z-index: 5; }
+        @keyframes pulse-pro { from { transform: scale(0.95); opacity: 0.8; } to { transform: scale(1.05); opacity: 1; } }
+
+        #bottom-area { margin-top: 15px; display: flex; gap: 15px; width: 70vmin; max-width: 400px; height: 16vh; min-height: 100px; z-index: 10; }
+        .status-panel { flex: 2; background: rgba(0, 0, 0, 0.4); border-radius: 16px; display: flex; flex-direction: column; justify-content: center; padding: 12px; border: 2px solid rgba(255,255,255,0.1); text-align: center; position: relative; overflow: hidden; backdrop-filter: blur(5px); }
+        #status-text { font-size: 18px; color: #fff; line-height: 1.4; z-index: 2; }
+        .highlight-text { color: #facc15; font-size: 20px; text-shadow: 0 0 8px rgba(250, 204, 21, 0.6); }
+        
+        .timer-bg { position: absolute; bottom: 0; left: 0; width: 100%; height: 8px; background: rgba(255,255,255,0.1); }
+        #timer-bar { height: 100%; width: 0%; background: linear-gradient(90deg, #38bdf8, #818cf8, #f43f5e); transition: width 0.1s linear; box-shadow: 0 0 10px rgba(244, 63, 94, 0.8); }
+        
+        .camera-monitor { flex: 1; border: 3px solid #334155; border-radius: 16px; overflow: hidden; background: #000; position: relative; }
+        video { width: 100%; height: 100%; transform: scaleX(-1); object-fit: cover; opacity: 0.7; }
+
+        .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; background: rgba(15, 23, 42, 0.95); z-index: 9999; cursor: pointer; text-align: center; padding: 20px; backdrop-filter: blur(10px); }
+        .title-logo { font-size: 42px; color: #fff; margin-bottom: 10px; text-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        .title-logo span { color: #38bdf8; }
+        .btn-start { background: linear-gradient(135deg, #38bdf8, #3b82f6); color: white; font-size: 24px; padding: 15px 40px; border-radius: 50px; border: none; box-shadow: 0 10px 20px rgba(59, 130, 246, 0.4); margin-top: 30px; font-family: inherit; font-weight: bold; cursor: pointer; transition: transform 0.2s; }
+        .btn-start:active { transform: scale(0.95); }
+
+        #turn-overlay { display: none; background: rgba(15, 23, 42, 0.85); color: #fff; font-size: 36px; font-weight: bold; z-index: 9998; }
+        .turn-message { text-shadow: 0 0 20px rgba(255,255,255,0.5); animation: pop 0.5s ease-out; z-index: 20; }
+        @keyframes pop { 0% { transform: scale(0.5); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+        
+        /* ★ 花火キャンバスを最前面に修正 */
+        #fireworks-canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 10000; pointer-events: none; display: none; }
+        .win-text { font-size: 48px; color: #facc15; text-shadow: 0 0 25px rgba(250, 204, 21, 0.8), 2px 2px 4px #000; animation: flash 1s infinite alternate; }
+        @keyframes flash { from { transform: scale(1); } to { transform: scale(1.1); } }
+    </style>
+</head>
+<body>
+
+    <!-- 花火専用キャンバス (オーバーレイの外に出して最前面化) -->
+    <canvas id="fireworks-canvas"></canvas>
+
+    <div id="start-screen" class="overlay" onclick="initApp()">
+        <div class="title-logo">Gaze Othello <span>SPEED</span></div>
+        <div style="font-size: 18px; line-height: 1.6; color: #cbd5e1; margin-top: 10px;">
+            ⚡ 4×4マスの超ミニオセロでスピード決着！<br>
+            ⏳ 場所が切り替わるスピードも速くなったよ！
+        </div>
+        <button class="btn-start">タップしてスタート</button>
+    </div>
+
+    <div id="turn-overlay" class="overlay">
+        <div id="turn-message-text" class="turn-message"></div>
+    </div>
+
+    <div class="header">
+        <div class="score-box"><div class="mini-disc black"></div><span id="black-score">2</span></div>
+        <div id="turn-info">黒のターン</div>
+        <div class="score-box"><span id="white-score">2</span><div class="mini-disc white"></div></div>
+    </div>
+
+    <div class="board-wrapper"><div id="board"></div></div>
+
+    <div id="bottom-area">
+        <div class="status-panel">
+            <div id="status-text">システムを準備しています...</div>
+            <div class="timer-bg"><div id="timer-bar"></div></div>
+        </div>
+        <div class="camera-monitor"><video id="webcam" autoplay playsinline muted></video></div>
+    </div>
+
+    <script>
+        const BOARD_SIZE = 4;
+        const BLACK = 1, WHITE = 2, EMPTY = 0;
+        let board = [], currentPlayer = BLACK;
+        const directions = [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
+
+        let validMoves = [];
+        let focusedMoveIndex = 0; 
+        
+        let isStarted = false;
+        let isTransitioning = false; 
+        let smoothedGazeRatio = 0.5;
+        
+        let lastAutoSwitchTime = 0;
+        const AUTO_SWITCH_INTERVAL = 3000; 
+
+        let canSelectByLookingAway = false; 
+        let audioCtx;
+
+        const boardEl = document.getElementById('board');
+        const turnInfoEl = document.getElementById('turn-info');
+        const statusText = document.getElementById('status-text');
+        const timerBar = document.getElementById('timer-bar');
+        const videoElement = document.getElementById('webcam');
+        const turnOverlay = document.getElementById('turn-overlay');
+        const turnMessageText = document.getElementById('turn-message-text');
+
+        let domCells = [];
+
+        function playTone(freq, type, duration) {
+            if(!audioCtx) return;
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration);
+            setTimeout(() => osc.stop(), duration * 1000);
+        }
+
+        function speak(text) {
+            if (!('speechSynthesis' in window)) return;
+            window.speechSynthesis.cancel();
+            const uttr = new SpeechSynthesisUtterance(text);
+            uttr.lang = 'ja-JP';
+            uttr.rate = 1.15;
+            uttr.pitch = 1.2;
+            window.speechSynthesis.speak(uttr);
+        }
+
+        function initApp() {
+            document.getElementById("start-screen").style.display = "none";
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            audioCtx = new AudioContext();
+
+            createBoardDOM();
+            initGame();
+            
+            try {
+                const faceMeshInstance = new FaceMesh({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}` });
+                faceMeshInstance.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+                faceMeshInstance.onResults(onResults);
+
+                const cameraInstance = new Camera(videoElement, { 
+                    onFrame: async () => { await faceMeshInstance.send({ image: videoElement }); }, 
+                    width: 640, height: 480 
+                });
+                cameraInstance.start();
+            } catch (error) {
+                alert("カメラの起動に失敗しました。");
+            }
+        }
+
+        function createBoardDOM() {
+            boardEl.innerHTML = '';
+            domCells = Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(null));
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    const discContainer = document.createElement('div');
+                    discContainer.className = 'disc-container';
+                    const disc = document.createElement('div');
+                    disc.className = 'disc';
+                    const blackSide = document.createElement('div');
+                    blackSide.className = 'disc-face black-side';
+                    const whiteSide = document.createElement('div');
+                    whiteSide.className = 'disc-face white-side';
+                    disc.appendChild(blackSide);
+                    disc.appendChild(whiteSide);
+                    discContainer.appendChild(disc);
+                    const hintRing = document.createElement('div');
+                    hintRing.className = 'hint-ring';
+                    cell.appendChild(discContainer);
+                    cell.appendChild(hintRing);
+                    boardEl.appendChild(cell);
+                    domCells[r][c] = { container: discContainer, disc: disc, hint: hintRing };
+                }
+            }
+        }
+
+        function initGame() {
+            board = Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(EMPTY));
+            board[1][1] = WHITE; board[1][2] = BLACK; board[2][1] = BLACK; board[2][2] = WHITE;
+            currentPlayer = BLACK;
+            isStarted = true;
+            
+            // ゲーム開始時に花火キャンバスをリセット
+            const canvas = document.getElementById('fireworks-canvas');
+            canvas.style.display = 'none';
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            updateValidMoves();
+            updateBoardUI();
+            startTurnTransition("ゲームスタート！<br>最初は黒の番です");
+        }
+
+        function getFlippedDiscs(r, c, player) {
+            if (board[r][c] !== EMPTY) return [];
+            const opponent = player === BLACK ? WHITE : BLACK;
+            let result = [];
+            for (const [dr, dc] of directions) {
+                let nr = r + dr, nc = c + dc, temp = [];
+                while (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && board[nr][nc] === opponent) {
+                    temp.push([nr, nc]); nr += dr; nc += dc;
+                }
+                if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && board[nr][nc] === player) {
+                    result = result.concat(temp);
+                }
+            }
+            return result;
+        }
+
+        function updateValidMoves() {
+            validMoves = [];
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    if (getFlippedDiscs(r, c, currentPlayer).length > 0) validMoves.push({ r, c });
+                }
+            }
+            focusedMoveIndex = 0; 
+            canSelectByLookingAway = false;
+        }
+
+        function startTurnTransition(customMessage = null) {
+            isTransitioning = true;
+            timerBar.style.width = '0%';
+            statusText.innerHTML = `<span class="highlight-text">交代の時間です！</span>`;
+
+            let colorText = currentPlayer === BLACK ? '⚫️ 黒' : '⚪️ 白';
+            let colorSpeak = currentPlayer === BLACK ? 'くろ' : 'しろ';
+
+            if (customMessage) {
+                turnMessageText.innerHTML = customMessage;
+                speak(currentPlayer === BLACK ? "最初は黒のばんです" : "最初は白のばんです");
+            } else {
+                turnMessageText.innerHTML = `${colorText} の番です！<br><span style="font-size: 22px; font-weight: normal; margin-top: 15px; display: block; color: #94a3b8;">カメラの前に移動してね</span>`;
+                speak(`${colorSpeak}の番だよ！交代してね！`);
+            }
+            
+            turnOverlay.style.display = 'flex';
+            playTone(880, 'sine', 0.3); 
+
+            setTimeout(() => {
+                turnOverlay.style.display = 'none';
+                lastAutoSwitchTime = Date.now();
+                isTransitioning = false;
+            }, 4000);
+        }
+
+        function placeDisc(r, c) {
+            const flipped = getFlippedDiscs(r, c, currentPlayer);
+            if (flipped.length === 0) return;
+            
+            board[r][c] = currentPlayer;
+            flipped.forEach(([fr, fc]) => { board[fr][fc] = currentPlayer; });
+            
+            playTone(800, 'square', 0.1); 
+            setTimeout(() => playTone(1200, 'square', 0.1), 100); 
+            
+            checkNextTurn();
+        }
+
+        function checkNextTurn() {
+            currentPlayer = currentPlayer === BLACK ? WHITE : BLACK;
+            updateValidMoves();
+
+            if (validMoves.length === 0) {
+                currentPlayer = currentPlayer === BLACK ? WHITE : BLACK;
+                updateValidMoves();
+                
+                if (validMoves.length === 0) {
+                    updateBoardUI();
+                    isStarted = false; 
+                    const b = parseInt(document.getElementById('black-score').textContent);
+                    const w = parseInt(document.getElementById('white-score').textContent);
+                    turnInfoEl.textContent = 'ゲームセット！';
+                    
+                    let winnerText = "";
+                    let speakText = "";
+                    if (b > w) { winnerText = "⚫️ 黒の勝ち〜！"; speakText = "くろの勝ちー！おめでとう！"; }
+                    else if (w > b) { winnerText = "⚪️ 白の勝ち〜！"; speakText = "しろの勝ちー！おめでとう！"; }
+                    else { winnerText = "引き分け！"; speakText = "ひきわけです！"; }
+
+                    statusText.innerHTML = `<span class="highlight-text">ゲームセット！</span>`;
+                    turnMessageText.innerHTML = `<div class="win-text">${winnerText}</div>`;
+                    
+                    turnOverlay.style.display = 'flex';
+                    speak("ゲームセット！" + speakText);
+                    
+                    // ★ 勝ち負けに関係なく（引き分けでも）花火を上げるように修正！
+                    startFireworks();
+                    
+                } else {
+                    updateBoardUI();
+                    turnMessageText.innerHTML = `⚠️ 置ける場所がないため パス！<br><span style="font-size: 24px; margin-top: 10px; display: block;">続けて ${currentPlayer === BLACK ? '⚫️ 黒' : '⚪️ 白'} の番です</span>`;
+                    speak("おく場所がないのでパス！そのままつづけてね！");
+                    turnOverlay.style.display = 'flex';
+                    playTone(200, 'sawtooth', 0.5); 
+                    
+                    isTransitioning = true;
+                    setTimeout(() => {
+                        turnOverlay.style.display = 'none';
+                        lastAutoSwitchTime = Date.now();
+                        isTransitioning = false;
+                    }, 4000);
+                }
+            } else {
+                updateBoardUI();
+                startTurnTransition();
+            }
+        }
+
+        function updateBoardUI() {
+            let blackCount = 0, whiteCount = 0;
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    const ui = domCells[r][c];
+                    
+                    if (board[r][c] !== EMPTY) {
+                        ui.container.classList.add('visible');
+                        if (board[r][c] === BLACK) {
+                            ui.disc.classList.remove('white-up');
+                            ui.disc.classList.add('black-up');
+                            blackCount++;
+                        } else {
+                            ui.disc.classList.remove('black-up');
+                            ui.disc.classList.add('white-up');
+                            whiteCount++;
+                        }
+                    } else {
+                        ui.container.classList.remove('visible');
+                    }
+
+                    ui.hint.className = 'hint-ring'; 
+                    
+                    if (isStarted && !isTransitioning) {
+                        const moveIndex = validMoves.findIndex(m => m.r === r && m.c === c);
+                        if (moveIndex !== -1) {
+                            ui.hint.classList.add('valid');
+                            if (moveIndex === focusedMoveIndex) {
+                                ui.hint.classList.add('focused');
+                            }
+                        }
+                    }
+                }
+            }
+            document.getElementById('black-score').textContent = blackCount;
+            document.getElementById('white-score').textContent = whiteCount;
+            
+            if (isStarted) {
+                turnInfoEl.textContent = currentPlayer === BLACK ? '黒のターン' : '白のターン';
+                turnInfoEl.style.color = currentPlayer === BLACK ? '#38bdf8' : '#f43f5e';
+            }
+        }
+
+        function getEyeAspectRatio(landmarks, top, bottom, left, right) {
+            const height = Math.abs(landmarks[bottom].y - landmarks[top].y);
+            const width = Math.abs(landmarks[right].x - landmarks[left].x);
+            return height / width;
+        }
+
+        function onResults(results) {
+            if (!isStarted || isTransitioning || validMoves.length === 0 || !results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0) return;
+            const landmarks = results.multiFaceLandmarks[0];
+            const leftEAR = getEyeAspectRatio(landmarks, 159, 145, 33, 133);
+            const rightEAR = getEyeAspectRatio(landmarks, 386, 374, 362, 263);
+            if (leftEAR < 0.15 || rightEAR < 0.15) return;
+
+            const leftMinX = Math.min(landmarks[33].x, landmarks[133].x), leftMaxX = Math.max(landmarks[33].x, landmarks[133].x);
+            const leftRatio = (landmarks[468].x - leftMinX) / (leftMaxX - leftMinX);
+            const rightMinX = Math.min(landmarks[263].x, landmarks[362].x), rightMaxX = Math.max(landmarks[263].x, landmarks[362].x);
+            const rightRatio = (landmarks[473].x - rightMinX) / (rightMaxX - rightMinX);
+
+            smoothedGazeRatio = smoothedGazeRatio * 0.7 + ((leftRatio + rightRatio) / 2) * 0.3;
+            const now = Date.now();
+
+            if (smoothedGazeRatio >= 0.43 && smoothedGazeRatio <= 0.57) {
+                canSelectByLookingAway = true; 
+                const elapsed = now - lastAutoSwitchTime;
+                const progress = Math.min((elapsed / AUTO_SWITCH_INTERVAL) * 100, 100);
+                timerBar.style.width = `${progress}%`;
+                statusText.innerHTML = `ここにする？<br><span class="highlight-text">決める時は 横を見てね！</span>`;
+
+                if (elapsed > AUTO_SWITCH_INTERVAL) {
+                    focusedMoveIndex = (focusedMoveIndex + 1) % validMoves.length;
+                    lastAutoSwitchTime = now;
+                    playTone(600, 'sine', 0.1); 
+                    updateBoardUI();
+                }
+            } 
+            else {
+                timerBar.style.width = `0%`; 
+                if (canSelectByLookingAway) {
+                    canSelectByLookingAway = false; 
+                    const move = validMoves[focusedMoveIndex];
+                    placeDisc(move.r, move.c);
+                }
+            }
+        }
+
+        // ★ 花火のアニメーションを確実に動かすように修正
+        function startFireworks() {
+            const canvas = document.getElementById('fireworks-canvas');
+            canvas.style.display = 'block';
+            const ctx = canvas.getContext('2d');
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+
+            let particles = [];
+            const colors = ['#f43f5e', '#38bdf8', '#facc15', '#4ade80', '#c084fc'];
+            let isAnimating = true;
+
+            function createFirework(x, y) {
+                playTone(400, 'sine', 0.1); 
+                for (let i = 0; i < 50; i++) {
+                    particles.push({
+                        x: x, y: y,
+                        vx: (Math.random() - 0.5) * 15,
+                        vy: (Math.random() - 0.5) * 15,
+                        color: colors[Math.floor(Math.random() * colors.length)],
+                        alpha: 1,
+                        size: Math.random() * 4 + 2
+                    });
+                }
+            }
+
+            let shots = 0;
+            const interval = setInterval(() => {
+                // 新しいゲームが始まったら花火を止める
+                if (isStarted) {
+                    clearInterval(interval);
+                    isAnimating = false;
+                    return;
+                }
+                createFirework(Math.random() * canvas.width, Math.random() * (canvas.height / 2));
+                shots++;
+                if (shots > 10) clearInterval(interval); 
+            }, 500);
+
+            function animate() {
+                if (!isAnimating || isStarted) {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    return;
+                }
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                for (let i = 0; i < particles.length; i++) {
+                    let p = particles[i];
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.vy += 0.2; 
+                    p.alpha -= 0.015; 
+
+                    ctx.globalAlpha = Math.max(0, p.alpha);
+                    ctx.fillStyle = p.color;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                particles = particles.filter(p => p.alpha > 0);
+                requestAnimationFrame(animate);
+            }
+            animate();
+        }
+
+        window.addEventListener('resize', () => {
+            const canvas = document.getElementById('fireworks-canvas');
+            if(canvas.style.display === 'block') {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+            }
+        });
+    </script>
+</body>
+</html>
